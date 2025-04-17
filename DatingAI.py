@@ -17,7 +17,7 @@ class ChatGPTMessengerApp:
     def __init__(self, root):
         self.root = root
         self.root.title("ChatGPT Messenger Assistent")
-        self.root.geometry("600x750")
+        self.root.geometry("600x800")
         
         # API-nøgle - HUSK AT ERSTATTE MED DIN EGEN
         self.api_key = "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"
@@ -111,6 +111,13 @@ class ChatGPTMessengerApp:
         self.tone_dropdown = ttk.Combobox(tone_frame, textvariable=self.tone_var, values=list(self.tone_options.keys()), width=25)
         self.tone_dropdown.grid(row=0, column=1, padx=10)
         
+        # Citationstegn fjernet helt - vi bruger ikke denne variabel længere
+        # self.quote_var = tk.BooleanVar()
+        # self.quote_var.set(False)
+        # self.quote_check = tk.Checkbutton(tone_frame, text="Inkluder citationstegn i svar", 
+        #                                  variable=self.quote_var, command=self.update_quotes_display)
+        # self.quote_check.grid(row=0, column=2, padx=10)
+        
         # Knapper til at generere forslag og tilføje beskeder
         button_frame = tk.Frame(self.root)
         button_frame.grid(row=8, column=0, padx=10, pady=10)
@@ -121,6 +128,10 @@ class ChatGPTMessengerApp:
         self.btn_add_message = tk.Button(button_frame, text="Tilføj hendes besked", command=self.add_received_message, width=20)
         self.btn_add_message.grid(row=0, column=1, padx=5)
         
+        # Import fra screenshot knap
+        self.btn_import = tk.Button(button_frame, text="Importer fra screenshot", command=self.import_conversation, width=20)
+        self.btn_import.grid(row=0, column=2, padx=5)
+        
         # Svarforslag liste
         tk.Label(self.root, text="Svarforslag (vælg eller tryk på tal):").grid(row=9, column=0, sticky="w", padx=10, pady=5)
         
@@ -129,13 +140,95 @@ class ChatGPTMessengerApp:
         self.listbox_suggestions.bind("<Key>", self.key_pressed)
         self.listbox_suggestions.bind("<Double-Button-1>", lambda e: self.send_to_messenger())
         
-        # Send knap
-        self.btn_send = tk.Button(self.root, text="Send Valgt Svar til Messenger", command=self.send_to_messenger, width=40, height=2)
-        self.btn_send.grid(row=11, column=0, padx=10, pady=10)
+        # Send og Udskriv knapper
+        button_frame2 = tk.Frame(self.root)
+        button_frame2.grid(row=11, column=0, padx=10, pady=10)
+        
+        self.btn_send = tk.Button(button_frame2, text="Send til Messenger", command=self.send_to_messenger, width=20, height=2)
+        self.btn_send.grid(row=0, column=0, padx=5)
+        
+        self.btn_type = tk.Button(button_frame2, text="Udskriv Tekst", command=self.type_message, width=20, height=2)
+        self.btn_type.grid(row=0, column=1, padx=5)
         
         # Status label
         self.lbl_status = tk.Label(self.root, text="Klar...")
         self.lbl_status.grid(row=12, column=0, sticky="w", padx=10, pady=5)
+    
+    def import_conversation(self):
+        """Importerer samtale fra et screenshot"""
+        import_text = simpledialog.askstring("Importér samtale", 
+                                           "Indsæt tekst fra dit samtale-screenshot.\n" + 
+                                           "Tekst i venstre side tolkes som 'Hende'\n" + 
+                                           "Tekst i højre side tolkes som 'Dig'", 
+                                           parent=self.root)
+        
+        if not import_text:
+            return
+        
+        # Fjern eventuelle citationstegn fra teksten
+        import_text = import_text.replace('"', '')
+        
+        # Nulstil samtalen
+        current_context = ""
+        
+        # Del teksten op i linjer
+        lines = import_text.split('\n')
+        last_position = None  # venstre eller højre
+        current_message = ""
+        
+        # Funktion til at afgøre om en linje er på venstre eller højre side
+        def is_right_side(text):
+            # Hvis teksten starter med flere mellemrum er det sandsynligvis højre side
+            if text.startswith("    ") or text.startswith("\t") or "      " in text:
+                return True
+            # Ellers antager vi det er venstre side
+            return False
+        
+        for line in lines:
+            if not line.strip():
+                # Gem eventuel nuværende besked før vi går videre
+                if current_message and last_position is not None:
+                    if last_position == "right":
+                        current_context += f"Dig: {current_message.strip()}\n"
+                    else:
+                        current_context += f"Hende: {current_message.strip()}\n"
+                    current_message = ""
+                continue
+            
+            # Afgør om linjen er på højre eller venstre side
+            current_position = "right" if is_right_side(line) else "left"
+            
+            # Hvis vi skifter side, gemmer vi den nuværende besked
+            if last_position is not None and current_position != last_position and current_message:
+                if last_position == "right":
+                    current_context += f"Dig: {current_message.strip()}\n"
+                else:
+                    current_context += f"Hende: {current_message.strip()}\n"
+                current_message = ""
+            
+            # Tilføj den nuværende linje til beskeden
+            current_message += line.strip() + " "
+            last_position = current_position
+        
+        # Gem den sidste besked hvis der er en
+        if current_message and last_position is not None:
+            if last_position == "right":
+                current_context += f"Dig: {current_message.strip()}\n"
+            else:
+                current_context += f"Hende: {current_message.strip()}\n"
+        
+        # Opdater samtalehistorikken
+        if current_context:
+            self.txt_context.delete("1.0", tk.END)
+            self.txt_context.insert("1.0", current_context.strip())
+            
+            # Gem opdateringen
+            self.save_current_conversation_state()
+            self.save_current_conversation()
+            
+            self.lbl_status.config(text="Samtale importeret!")
+        else:
+            messagebox.showinfo("Information", "Ingen gyldig samtalehistorik fundet.")
     
     def load_conversations(self):
         """Indlæser gemte samtaler"""
@@ -260,6 +353,17 @@ class ChatGPTMessengerApp:
                 except Exception as e:
                     messagebox.showwarning("Advarsel", f"Kunne ikke slette samtale: {str(e)}")
     
+    def update_quotes_display(self):
+        """Opdaterer visningen af svarforslagene - fjernet citationstegn funktionalitet"""
+        if not self.suggestions:
+            return  # Ingen forslag at opdatere
+            
+        self.listbox_suggestions.delete(0, tk.END)  # Ryd nuværende liste
+        
+        for index, suggestion in enumerate(self.suggestions):
+            # Ingen citationstegn overhovedet
+            self.listbox_suggestions.insert(tk.END, f"{index+1}. {suggestion}")
+    
     def generate_suggestions(self):
         """Genererer svarforslag ved hjælp af ChatGPT API"""
         try:
@@ -310,14 +414,20 @@ class ChatGPTMessengerApp:
             if "choices" in response_json and len(response_json["choices"]) > 0:
                 assistant_response = response_json["choices"][0]["message"]["content"]
                 
-                # Udpak svarforslag
+                # Udpak svarforslag og fjern alle citationstegn
                 lines = assistant_response.split("\n")
                 for line in lines:
-                    line = line.strip()
+                    line = line.strip().replace('"', '')
                     if line.startswith("1.") or line.startswith("2.") or line.startswith("3.") or line.startswith("4.") or line.startswith("5."):
+                        # Fjern nummeret og behold kun selve svaret
                         suggestion = line[line.index(".")+1:].strip()
+                        
+                        # Gem det rene forslag (uden nummer og uden citationstegn)
                         self.suggestions.append(suggestion)
-                        self.listbox_suggestions.insert(tk.END, f"{len(self.suggestions)}. {suggestion}")
+                        
+                        # Indsæt i listbox uden citationstegn
+                        current_index = len(self.suggestions)
+                        self.listbox_suggestions.insert(tk.END, f"{current_index}. {suggestion}")
                 
                 self.lbl_status.config(text=f"Forslag genereret i tone: {selected_tone}!")
             else:
@@ -330,7 +440,7 @@ class ChatGPTMessengerApp:
             messagebox.showerror("Fejl", f"En fejl opstod: {str(e)}")
     
     def send_to_messenger(self):
-        """Sender det valgte svar til Messenger"""
+        """Sender det valgte svar til Messenger med Enter"""
         selected_index = self.listbox_suggestions.curselection()
         
         if selected_index:
@@ -338,36 +448,64 @@ class ChatGPTMessengerApp:
             if 0 <= selected_index < len(self.suggestions):
                 selected_suggestion = self.suggestions[selected_index]
                 
-                # Giv brugeren tid til at skifte til Messenger vinduet
-                countdown_time = 5
+                # Giv brugeren tid til at skifte til det rette vindue
+                self._perform_text_action(selected_suggestion, press_enter=True)
                 
-                for i in range(countdown_time, 0, -1):
-                    self.lbl_status.config(text=f"Skift til Messenger-vinduet nu ({i} sekunder)...")
-                    self.root.update()
-                    time.sleep(1)
-                
-                # Simuler tastaturinput
-                pyautogui.typewrite(selected_suggestion)
-                pyautogui.press('enter')
-                
-                # Opdater samtalehistorik
-                context = self.txt_context.get("1.0", tk.END).strip()
-                context += f"\nDig: {selected_suggestion}"
-                self.txt_context.delete("1.0", tk.END)
-                self.txt_context.insert("1.0", context)
-                
-                # Ryd sidste besked felt
-                self.txt_last_message.delete("1.0", tk.END)
-                
-                # Gem samtalen
-                self.save_current_conversation_state()
-                self.save_current_conversation()
-                
-                self.lbl_status.config(text="Besked sendt til Messenger!")
+                self.lbl_status.config(text="Besked sendt!")
             else:
                 messagebox.showinfo("Information", "Ugyldigt valg.")
         else:
             messagebox.showinfo("Information", "Vælg et forslag først.")
+    
+    def type_message(self):
+        """Skriver teksten uden at trykke Enter"""
+        selected_index = self.listbox_suggestions.curselection()
+        
+        if selected_index:
+            selected_index = int(selected_index[0])
+            if 0 <= selected_index < len(self.suggestions):
+                selected_suggestion = self.suggestions[selected_index]
+                
+                # Giv brugeren tid til at skifte til det rette vindue
+                self._perform_text_action(selected_suggestion, press_enter=False)
+                
+                self.lbl_status.config(text="Tekst udskrevet!")
+            else:
+                messagebox.showinfo("Information", "Ugyldigt valg.")
+        else:
+            messagebox.showinfo("Information", "Vælg et forslag først.")
+    
+    def _perform_text_action(self, text, press_enter=True):
+        """Fælles funktion til at skrive tekst med eller uden Enter"""
+        # Giv brugeren tid til at skifte til det rette vindue
+        countdown_time = 5
+        
+        for i in range(countdown_time, 0, -1):
+            self.lbl_status.config(text=f"Skift til det rette vindue nu ({i} sekunder)...")
+            self.root.update()
+            time.sleep(1)
+        
+        # Fjern alle citationstegn fra teksten
+        output_text = text.replace('"', '')
+        
+        # Simuler tastaturinput
+        pyautogui.typewrite(output_text)
+        
+        if press_enter:
+            pyautogui.press('enter')
+        
+        # Opdater samtalehistorik
+        context = self.txt_context.get("1.0", tk.END).strip()
+        context += f"\nDig: {output_text}"
+        self.txt_context.delete("1.0", tk.END)
+        self.txt_context.insert("1.0", context)
+        
+        # Ryd sidste besked felt
+        self.txt_last_message.delete("1.0", tk.END)
+        
+        # Gem samtalen
+        self.save_current_conversation_state()
+        self.save_current_conversation()
     
     def add_received_message(self):
         """Tilføjer modtagerens svar til samtalehistorikken"""
@@ -409,6 +547,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
 #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
