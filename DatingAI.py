@@ -6,6 +6,11 @@ import pyautogui
 import time
 import os
 import pickle
+from PIL import Image, ImageTk, ImageGrab
+import pytesseract
+
+# Tesseract path - you may need to adjust this for your system
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 class Conversation:
     def __init__(self, name, context="", last_message=""):
@@ -13,26 +18,31 @@ class Conversation:
         self.context = context
         self.last_message = last_message
 
-class ChatGPTMessengerApp:
+class CombinedDatingApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("ChatGPT Messenger Assistent")
-        self.root.geometry("600x800")
+        self.root.title("Dating Assistant Pro")
+        self.root.geometry("800x900")  # Increased height to accommodate additional features
         
-        # API-nøgle - HUSK AT ERSTATTE MED DIN EGEN
+        # API key - REMEMBER TO REPLACE WITH YOUR OWN
         self.api_key = "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"
         
-        # Variabler til at gemme data
+        # Variables to store data
         self.suggestions = []
-        self.conversations = {}  # Dict til at gemme flere samtaler
+        self.conversations = {}  # Dict to store multiple conversations
         self.current_conversation = None
         
-        # Mappe til at gemme samtaler
+        # Image scanning variables
+        self.current_image = None
+        self.full_screenshot = None
+        self.area_window = None
+        
+        # Folder to save conversations
         self.data_dir = "samtaler"
         if not os.path.exists(self.data_dir):
             os.makedirs(self.data_dir)
             
-        # Forskellige tone-muligheder og beskrivelser
+        # Different tone options and descriptions
         self.tone_options = {
             "Almindelig": "Giv mig 5 almindelige og naturlige svarmuligheder.",
             "Flirtende": "Giv mig 5 flirtende og charmerende svarmuligheder der viser interesse.",
@@ -44,25 +54,42 @@ class ChatGPTMessengerApp:
             "Spørgende": "Giv mig 5 svarmuligheder med interessante spørgsmål der kan holde samtalen i gang."
         }
         
-        # Indlæs gemte samtaler
+        # Load saved conversations
         self.load_conversations()
         
-        # GUI elementer
-        self.create_widgets()
+        # Create notebook for tabs
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        # Opret en ny samtale hvis der ikke er nogen
+        # Create tabs
+        self.suggestions_tab = ttk.Frame(self.notebook)
+        self.scanner_tab = ttk.Frame(self.notebook)
+        
+        self.notebook.add(self.suggestions_tab, text="Svarforslag")
+        self.notebook.add(self.scanner_tab, text="Samtale Scanner")
+        
+        # Create GUI elements for each tab
+        self.create_suggestions_widgets()
+        self.create_scanner_widgets()
+        
+        # Create a new conversation if there are none
         if not self.conversations:
             self.new_conversation()
         else:
-            # Vælg den første samtale som standard
+            # Select the first conversation as default
             first_key = list(self.conversations.keys())[0]
             self.current_conversation = self.conversations[first_key]
             self.update_conversation_display()
             self.update_conversation_dropdown()
+            
+        # Status bar at bottom of main window
+        self.lbl_status = tk.Label(self.root, text="Klar...", bd=1, relief=tk.SUNKEN, anchor=tk.W)
+        self.lbl_status.pack(side=tk.BOTTOM, fill=tk.X)
         
-    def create_widgets(self):
-        # Menu til samtaler
-        menu_frame = tk.Frame(self.root)
+    def create_suggestions_widgets(self):
+        """Create widgets for the suggestions tab"""
+        # Menu for conversations
+        menu_frame = tk.Frame(self.suggestions_tab)
         menu_frame.grid(row=0, column=0, padx=10, pady=5, sticky="w")
         
         tk.Label(menu_frame, text="Aktiv samtale:").grid(row=0, column=0, sticky="w")
@@ -84,42 +111,35 @@ class ChatGPTMessengerApp:
         self.btn_delete = tk.Button(conversation_buttons, text="Slet", command=self.delete_conversation, width=8)
         self.btn_delete.grid(row=0, column=2, padx=2)
         
-        # Samtalehistorik
-        tk.Label(self.root, text="Samtalehistorik:").grid(row=1, column=0, sticky="w", padx=10, pady=5)
-        self.txt_context = scrolledtext.ScrolledText(self.root, width=65, height=10)
+        # Conversation history
+        tk.Label(self.suggestions_tab, text="Samtalehistorik:").grid(row=1, column=0, sticky="w", padx=10, pady=5)
+        self.txt_context = scrolledtext.ScrolledText(self.suggestions_tab, width=75, height=10)
         self.txt_context.grid(row=2, column=0, padx=10, pady=5)
         
-        # Hendes sidste besked
-        tk.Label(self.root, text="Hendes seneste besked:").grid(row=3, column=0, sticky="w", padx=10, pady=5)
-        self.txt_last_message = scrolledtext.ScrolledText(self.root, width=65, height=3)
+        # Her last message
+        tk.Label(self.suggestions_tab, text="Hendes seneste besked:").grid(row=3, column=0, sticky="w", padx=10, pady=5)
+        self.txt_last_message = scrolledtext.ScrolledText(self.suggestions_tab, width=75, height=3)
         self.txt_last_message.grid(row=4, column=0, padx=10, pady=5)
         
-        # Ekstra instrukser
-        tk.Label(self.root, text="Ekstra instrukser (valgfrit):").grid(row=5, column=0, sticky="w", padx=10, pady=5)
-        self.txt_extra_instructions = scrolledtext.ScrolledText(self.root, width=65, height=2)
+        # Extra instructions
+        tk.Label(self.suggestions_tab, text="Ekstra instrukser (valgfrit):").grid(row=5, column=0, sticky="w", padx=10, pady=5)
+        self.txt_extra_instructions = scrolledtext.ScrolledText(self.suggestions_tab, width=75, height=2)
         self.txt_extra_instructions.grid(row=6, column=0, padx=10, pady=5)
         
-        # Vælg tone
-        tone_frame = tk.Frame(self.root)
+        # Select tone
+        tone_frame = tk.Frame(self.suggestions_tab)
         tone_frame.grid(row=7, column=0, padx=10, pady=5, sticky="w")
         
         tk.Label(tone_frame, text="Vælg tone:").grid(row=0, column=0, sticky="w")
         
         self.tone_var = tk.StringVar()
-        self.tone_var.set(list(self.tone_options.keys())[0])  # Standard tone
+        self.tone_var.set(list(self.tone_options.keys())[0])  # Default tone
         
         self.tone_dropdown = ttk.Combobox(tone_frame, textvariable=self.tone_var, values=list(self.tone_options.keys()), width=25)
         self.tone_dropdown.grid(row=0, column=1, padx=10)
         
-        # Citationstegn fjernet helt - vi bruger ikke denne variabel længere
-        # self.quote_var = tk.BooleanVar()
-        # self.quote_var.set(False)
-        # self.quote_check = tk.Checkbutton(tone_frame, text="Inkluder citationstegn i svar", 
-        #                                  variable=self.quote_var, command=self.update_quotes_display)
-        # self.quote_check.grid(row=0, column=2, padx=10)
-        
-        # Knapper til at generere forslag og tilføje beskeder
-        button_frame = tk.Frame(self.root)
+        # Buttons to generate suggestions and add messages
+        button_frame = tk.Frame(self.suggestions_tab)
         button_frame.grid(row=8, column=0, padx=10, pady=10)
         
         self.btn_generate = tk.Button(button_frame, text="Generer Svarforslag", command=self.generate_suggestions, width=20)
@@ -128,20 +148,20 @@ class ChatGPTMessengerApp:
         self.btn_add_message = tk.Button(button_frame, text="Tilføj hendes besked", command=self.add_received_message, width=20)
         self.btn_add_message.grid(row=0, column=1, padx=5)
         
-        # Import fra screenshot knap
-        self.btn_import = tk.Button(button_frame, text="Importer fra screenshot", command=self.import_conversation, width=20)
-        self.btn_import.grid(row=0, column=2, padx=5)
+        # Import from scanner button - NEW: Link to scanner
+        self.btn_import_from_scanner = tk.Button(button_frame, text="Importer fra scanner", command=self.import_from_scanner, width=20)
+        self.btn_import_from_scanner.grid(row=0, column=2, padx=5)
         
-        # Svarforslag liste
-        tk.Label(self.root, text="Svarforslag (vælg eller tryk på tal):").grid(row=9, column=0, sticky="w", padx=10, pady=5)
+        # Suggestions list
+        tk.Label(self.suggestions_tab, text="Svarforslag (vælg eller tryk på tal):").grid(row=9, column=0, sticky="w", padx=10, pady=5)
         
-        self.listbox_suggestions = tk.Listbox(self.root, width=65, height=10)
+        self.listbox_suggestions = tk.Listbox(self.suggestions_tab, width=75, height=10)
         self.listbox_suggestions.grid(row=10, column=0, padx=10, pady=5)
         self.listbox_suggestions.bind("<Key>", self.key_pressed)
         self.listbox_suggestions.bind("<Double-Button-1>", lambda e: self.send_to_messenger())
         
-        # Send og Udskriv knapper
-        button_frame2 = tk.Frame(self.root)
+        # Send and Print buttons
+        button_frame2 = tk.Frame(self.suggestions_tab)
         button_frame2.grid(row=11, column=0, padx=10, pady=10)
         
         self.btn_send = tk.Button(button_frame2, text="Send til Messenger", command=self.send_to_messenger, width=20, height=2)
@@ -149,89 +169,116 @@ class ChatGPTMessengerApp:
         
         self.btn_type = tk.Button(button_frame2, text="Udskriv Tekst", command=self.type_message, width=20, height=2)
         self.btn_type.grid(row=0, column=1, padx=5)
-        
-        # Status label
-        self.lbl_status = tk.Label(self.root, text="Klar...")
-        self.lbl_status.grid(row=12, column=0, sticky="w", padx=10, pady=5)
     
-    def import_conversation(self):
-        """Importerer samtale fra et screenshot"""
-        import_text = simpledialog.askstring("Importér samtale", 
-                                           "Indsæt tekst fra dit samtale-screenshot.\n" + 
-                                           "Tekst i venstre side tolkes som 'Hende'\n" + 
-                                           "Tekst i højre side tolkes som 'Dig'", 
-                                           parent=self.root)
+    def create_scanner_widgets(self):
+        """Create widgets for the scanner tab"""
+        # Control panel
+        control_panel = tk.Frame(self.scanner_tab)
+        control_panel.pack(fill=tk.X, pady=5)
         
-        if not import_text:
+        # Buttons
+        upload_btn = tk.Button(control_panel, text="Upload billede", command=self.upload_image)
+        upload_btn.pack(side=tk.LEFT, padx=5)
+        
+        screenshot_btn = tk.Button(control_panel, text="Tag skærmbillede", command=self.select_area)
+        screenshot_btn.pack(side=tk.LEFT, padx=5)
+        
+        scan_btn = tk.Button(control_panel, text="Scan samtale", command=self.scan_conversation)
+        scan_btn.pack(side=tk.LEFT, padx=5)
+        
+        delete_btn = tk.Button(control_panel, text="Slet billede", command=self.clear_image)
+        delete_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Send to suggestions button - NEW: Link to suggestions
+        send_to_suggestions_btn = tk.Button(control_panel, text="Send til Svarforslag", command=self.send_to_suggestions)
+        send_to_suggestions_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Image area
+        image_frame = tk.LabelFrame(self.scanner_tab, text="Billede")
+        image_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        self.image_label = tk.Label(image_frame)
+        self.image_label.pack(fill=tk.BOTH, expand=True)
+        
+        # Result area
+        result_frame = tk.LabelFrame(self.scanner_tab, text="Samtaleresultat")
+        result_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        self.result_text = scrolledtext.ScrolledText(result_frame, wrap=tk.WORD, height=10)
+        self.result_text.pack(fill=tk.BOTH, expand=True)
+    
+    # INTEGRATION METHODS
+    
+    def import_from_scanner(self):
+        """Import conversation from the scanner to the suggestions tab"""
+        # Switch to scanner tab
+        self.notebook.select(self.scanner_tab)
+        messagebox.showinfo("Information", "Tag et skærmbillede eller upload et billede af samtalen, og klik derefter på 'Send til Svarforslag' efter scanning.")
+    
+    def send_to_suggestions(self):
+        """Send scanned conversation to suggestions tab"""
+        # Check if we have scanned text
+        scanned_text = self.result_text.get("1.0", tk.END).strip()
+        if not scanned_text:
+            messagebox.showinfo("Information", "Scan et billede først")
             return
+            
+        # Process the scanned text
+        processed_text = self.process_for_suggestions(scanned_text)
         
-        # Fjern eventuelle citationstegn fra teksten
-        import_text = import_text.replace('"', '')
+        # Update the conversation history in suggestions tab
+        current_context = self.txt_context.get("1.0", tk.END).strip()
         
-        # Nulstil samtalen
-        current_context = ""
+        # Either update existing or create new
+        if current_context:
+            # Add to existing conversation
+            self.txt_context.delete("1.0", tk.END)
+            self.txt_context.insert("1.0", current_context + "\n" + processed_text)
+        else:
+            # New conversation
+            self.txt_context.insert("1.0", processed_text)
         
-        # Del teksten op i linjer
-        lines = import_text.split('\n')
-        last_position = None  # venstre eller højre
-        current_message = ""
+        # Switch to suggestions tab
+        self.notebook.select(self.suggestions_tab)
         
-        # Funktion til at afgøre om en linje er på venstre eller højre side
-        def is_right_side(text):
-            # Hvis teksten starter med flere mellemrum er det sandsynligvis højre side
-            if text.startswith("    ") or text.startswith("\t") or "      " in text:
-                return True
-            # Ellers antager vi det er venstre side
-            return False
+        # Save the updated conversation
+        self.save_current_conversation_state()
+        self.save_current_conversation()
+        
+        self.lbl_status.config(text="Samtale importeret fra scanner!")
+    
+    def process_for_suggestions(self, scanned_text):
+        """Process scanned text into suggestion-friendly format"""
+        processed_lines = []
+        lines = scanned_text.split('\n')
         
         for line in lines:
-            if not line.strip():
-                # Gem eventuel nuværende besked før vi går videre
-                if current_message and last_position is not None:
-                    if last_position == "right":
-                        current_context += f"Dig: {current_message.strip()}\n"
-                    else:
-                        current_context += f"Hende: {current_message.strip()}\n"
-                    current_message = ""
+            line = line.strip()
+            if not line:
                 continue
-            
-            # Afgør om linjen er på højre eller venstre side
-            current_position = "right" if is_right_side(line) else "left"
-            
-            # Hvis vi skifter side, gemmer vi den nuværende besked
-            if last_position is not None and current_position != last_position and current_message:
-                if last_position == "right":
-                    current_context += f"Dig: {current_message.strip()}\n"
-                else:
-                    current_context += f"Hende: {current_message.strip()}\n"
-                current_message = ""
-            
-            # Tilføj den nuværende linje til beskeden
-            current_message += line.strip() + " "
-            last_position = current_position
+                
+            if line.startswith("DIG (højre):"):
+                # Extract just the message content
+                message = line.replace("DIG (højre):", "").strip()
+                processed_lines.append(f"Dig: {message}")
+            elif line.startswith("DEM (venstre):"):
+                # Extract just the message content
+                message = line.replace("DEM (venstre):", "").strip()
+                processed_lines.append(f"Hende: {message}")
+                # Also update the last message field with her latest message
+                self.txt_last_message.delete("1.0", tk.END)
+                self.txt_last_message.insert("1.0", message)
+            elif line.startswith("UKENDT:"):
+                # For unknown, try to guess based on content
+                message = line.replace("UKENDT:", "").strip()
+                processed_lines.append(f"Ukendt: {message}")
         
-        # Gem den sidste besked hvis der er en
-        if current_message and last_position is not None:
-            if last_position == "right":
-                current_context += f"Dig: {current_message.strip()}\n"
-            else:
-                current_context += f"Hende: {current_message.strip()}\n"
-        
-        # Opdater samtalehistorikken
-        if current_context:
-            self.txt_context.delete("1.0", tk.END)
-            self.txt_context.insert("1.0", current_context.strip())
-            
-            # Gem opdateringen
-            self.save_current_conversation_state()
-            self.save_current_conversation()
-            
-            self.lbl_status.config(text="Samtale importeret!")
-        else:
-            messagebox.showinfo("Information", "Ingen gyldig samtalehistorik fundet.")
+        return "\n".join(processed_lines)
+    
+    # SUGGESTIONS TAB METHODS
     
     def load_conversations(self):
-        """Indlæser gemte samtaler"""
+        """Load saved conversations"""
         try:
             files = [f for f in os.listdir(self.data_dir) if f.endswith('.conv')]
             for file in files:
@@ -243,7 +290,7 @@ class ChatGPTMessengerApp:
             messagebox.showwarning("Advarsel", f"Kunne ikke indlæse samtaler: {str(e)}")
     
     def save_conversations(self):
-        """Gemmer alle samtaler"""
+        """Save all conversations"""
         for name, conversation in self.conversations.items():
             try:
                 file_path = os.path.join(self.data_dir, f"{name}.conv")
@@ -253,13 +300,13 @@ class ChatGPTMessengerApp:
                 messagebox.showwarning("Advarsel", f"Kunne ikke gemme samtale '{name}': {str(e)}")
     
     def update_conversation_dropdown(self):
-        """Opdaterer dropdown med samtale-navne"""
+        """Update dropdown with conversation names"""
         self.conversation_dropdown['values'] = list(self.conversations.keys())
         if self.current_conversation:
             self.conversation_var.set(self.current_conversation.name)
     
     def update_conversation_display(self):
-        """Opdaterer GUI med den valgte samtale"""
+        """Update GUI with the selected conversation"""
         if self.current_conversation:
             self.txt_context.delete("1.0", tk.END)
             self.txt_context.insert("1.0", self.current_conversation.context)
@@ -268,13 +315,13 @@ class ChatGPTMessengerApp:
             self.txt_last_message.insert("1.0", self.current_conversation.last_message)
     
     def save_current_conversation_state(self):
-        """Gemmer den aktuelle tilstand af samtalen"""
+        """Save the current state of the conversation"""
         if self.current_conversation:
             self.current_conversation.context = self.txt_context.get("1.0", tk.END).strip()
             self.current_conversation.last_message = self.txt_last_message.get("1.0", tk.END).strip()
     
     def new_conversation(self):
-        """Opretter en ny samtale"""
+        """Create a new conversation"""
         name = simpledialog.askstring("Ny samtale", "Indtast navn på den nye samtale:")
         if name and name.strip():
             name = name.strip()
@@ -282,30 +329,30 @@ class ChatGPTMessengerApp:
                 messagebox.showwarning("Advarsel", f"En samtale med navnet '{name}' findes allerede.")
                 return
             
-            self.save_current_conversation_state()  # Gem den aktuelle samtale først
+            self.save_current_conversation_state()  # Save the current conversation first
             
-            # Opret ny samtale
+            # Create new conversation
             self.conversations[name] = Conversation(name)
             self.current_conversation = self.conversations[name]
             
-            # Opdater GUI
+            # Update GUI
             self.update_conversation_dropdown()
             self.txt_context.delete("1.0", tk.END)
             self.txt_last_message.delete("1.0", tk.END)
             self.listbox_suggestions.delete(0, tk.END)
             self.suggestions = []
             
-            self.save_conversations()  # Gem alle samtaler
+            self.save_conversations()  # Save all conversations
             self.lbl_status.config(text=f"Ny samtale '{name}' oprettet.")
     
     def on_conversation_selected(self, event):
-        """Håndterer valg af samtale fra dropdown"""
+        """Handle selection of conversation from dropdown"""
         selected_name = self.conversation_var.get()
         if selected_name in self.conversations:
-            # Gem først den aktuelle samtale
+            # Save the current conversation first
             self.save_current_conversation_state()
             
-            # Skift til den valgte samtale
+            # Switch to the selected conversation
             self.current_conversation = self.conversations[selected_name]
             self.update_conversation_display()
             self.listbox_suggestions.delete(0, tk.END)
@@ -314,7 +361,7 @@ class ChatGPTMessengerApp:
             self.lbl_status.config(text=f"Skiftede til samtale: '{selected_name}'")
     
     def save_current_conversation(self):
-        """Gemmer den aktuelle samtale"""
+        """Save the current conversation"""
         if self.current_conversation:
             self.save_current_conversation_state()
             try:
@@ -326,21 +373,21 @@ class ChatGPTMessengerApp:
                 messagebox.showwarning("Advarsel", f"Kunne ikke gemme samtale: {str(e)}")
     
     def delete_conversation(self):
-        """Sletter den aktuelle samtale"""
+        """Delete the current conversation"""
         if self.current_conversation:
             name = self.current_conversation.name
             confirm = messagebox.askyesno("Bekræft sletning", f"Er du sikker på, at du vil slette samtalen '{name}'?")
             if confirm:
                 try:
-                    # Slet fil
+                    # Delete file
                     file_path = os.path.join(self.data_dir, f"{name}.conv")
                     if os.path.exists(file_path):
                         os.remove(file_path)
                     
-                    # Fjern fra dictionary
+                    # Remove from dictionary
                     del self.conversations[name]
                     
-                    # Skift til en anden samtale hvis muligt
+                    # Switch to another conversation if possible
                     if self.conversations:
                         self.current_conversation = list(self.conversations.values())[0]
                     else:
@@ -353,45 +400,34 @@ class ChatGPTMessengerApp:
                 except Exception as e:
                     messagebox.showwarning("Advarsel", f"Kunne ikke slette samtale: {str(e)}")
     
-    def update_quotes_display(self):
-        """Opdaterer visningen af svarforslagene - fjernet citationstegn funktionalitet"""
-        if not self.suggestions:
-            return  # Ingen forslag at opdatere
-            
-        self.listbox_suggestions.delete(0, tk.END)  # Ryd nuværende liste
-        
-        for index, suggestion in enumerate(self.suggestions):
-            # Ingen citationstegn overhovedet
-            self.listbox_suggestions.insert(tk.END, f"{index+1}. {suggestion}")
-    
     def generate_suggestions(self):
-        """Genererer svarforslag ved hjælp af ChatGPT API"""
+        """Generate response suggestions using ChatGPT API"""
         try:
             self.lbl_status.config(text="Genererer forslag...")
             self.root.update()
             
-            # Ryd tidligere forslag
+            # Clear previous suggestions
             self.listbox_suggestions.delete(0, tk.END)
             self.suggestions = []
             
-            # Hent data fra input felter
+            # Get data from input fields
             context = self.txt_context.get("1.0", tk.END).strip()
             last_message = self.txt_last_message.get("1.0", tk.END).strip()
             extra_instructions = self.txt_extra_instructions.get("1.0", tk.END).strip()
             selected_tone = self.tone_var.get()
             tone_instruction = self.tone_options[selected_tone]
             
-            # Gem det aktuelle stadie af samtalen
+            # Save the current state of the conversation
             self.save_current_conversation_state()
             
-            # Forbered system besked baseret på tone og ekstra instrukser
+            # Prepare system message based on tone and extra instructions
             system_message = ("Du er en assistent der skal hjælpe med at generere gode, naturlige " 
                              "og varierede svar til en samtale med en pige. ")
             
             if extra_instructions:
                 system_message += f"Følg disse specifikke instrukser: {extra_instructions}. "
             
-            # Forbered API anmodning
+            # Prepare API request
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json"
@@ -406,26 +442,26 @@ class ChatGPTMessengerApp:
                 "max_tokens": 500
             }
             
-            # Send anmodning til API
+            # Send request to API
             response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, data=json.dumps(data))
             response_json = response.json()
             
-            # Behandl svar
+            # Process response
             if "choices" in response_json and len(response_json["choices"]) > 0:
                 assistant_response = response_json["choices"][0]["message"]["content"]
                 
-                # Udpak svarforslag og fjern alle citationstegn
+                # Unpack response suggestions and remove all quotation marks
                 lines = assistant_response.split("\n")
                 for line in lines:
                     line = line.strip().replace('"', '')
                     if line.startswith("1.") or line.startswith("2.") or line.startswith("3.") or line.startswith("4.") or line.startswith("5."):
-                        # Fjern nummeret og behold kun selve svaret
+                        # Remove the number and keep only the answer itself
                         suggestion = line[line.index(".")+1:].strip()
                         
-                        # Gem det rene forslag (uden nummer og uden citationstegn)
+                        # Save the clean suggestion (without number and without quotation marks)
                         self.suggestions.append(suggestion)
                         
-                        # Indsæt i listbox uden citationstegn
+                        # Insert in listbox without quotation marks
                         current_index = len(self.suggestions)
                         self.listbox_suggestions.insert(tk.END, f"{current_index}. {suggestion}")
                 
@@ -440,7 +476,7 @@ class ChatGPTMessengerApp:
             messagebox.showerror("Fejl", f"En fejl opstod: {str(e)}")
     
     def send_to_messenger(self):
-        """Sender det valgte svar til Messenger med Enter"""
+        """Send the selected response to Messenger with Enter"""
         selected_index = self.listbox_suggestions.curselection()
         
         if selected_index:
@@ -448,7 +484,7 @@ class ChatGPTMessengerApp:
             if 0 <= selected_index < len(self.suggestions):
                 selected_suggestion = self.suggestions[selected_index]
                 
-                # Giv brugeren tid til at skifte til det rette vindue
+                # Give the user time to switch to the right window
                 self._perform_text_action(selected_suggestion, press_enter=True)
                 
                 self.lbl_status.config(text="Besked sendt!")
@@ -458,7 +494,7 @@ class ChatGPTMessengerApp:
             messagebox.showinfo("Information", "Vælg et forslag først.")
     
     def type_message(self):
-        """Skriver teksten uden at trykke Enter"""
+        """Type the text without pressing Enter"""
         selected_index = self.listbox_suggestions.curselection()
         
         if selected_index:
@@ -466,7 +502,7 @@ class ChatGPTMessengerApp:
             if 0 <= selected_index < len(self.suggestions):
                 selected_suggestion = self.suggestions[selected_index]
                 
-                # Giv brugeren tid til at skifte til det rette vindue
+                # Give the user time to switch to the right window
                 self._perform_text_action(selected_suggestion, press_enter=False)
                 
                 self.lbl_status.config(text="Tekst udskrevet!")
@@ -476,8 +512,8 @@ class ChatGPTMessengerApp:
             messagebox.showinfo("Information", "Vælg et forslag først.")
     
     def _perform_text_action(self, text, press_enter=True):
-        """Fælles funktion til at skrive tekst med eller uden Enter"""
-        # Giv brugeren tid til at skifte til det rette vindue
+        """Common function to write text with or without Enter"""
+        # Give the user time to switch to the right window
         countdown_time = 5
         
         for i in range(countdown_time, 0, -1):
@@ -485,43 +521,43 @@ class ChatGPTMessengerApp:
             self.root.update()
             time.sleep(1)
         
-        # Fjern alle citationstegn fra teksten
+        # Remove all quotation marks from the text
         output_text = text.replace('"', '')
         
-        # Simuler tastaturinput
+        # Simulate keyboard input
         pyautogui.typewrite(output_text)
         
         if press_enter:
             pyautogui.press('enter')
         
-        # Opdater samtalehistorik
+        # Update conversation history
         context = self.txt_context.get("1.0", tk.END).strip()
         context += f"\nDig: {output_text}"
         self.txt_context.delete("1.0", tk.END)
         self.txt_context.insert("1.0", context)
         
-        # Ryd sidste besked felt
+        # Clear last message field
         self.txt_last_message.delete("1.0", tk.END)
         
-        # Gem samtalen
+        # Save conversation
         self.save_current_conversation_state()
         self.save_current_conversation()
     
     def add_received_message(self):
-        """Tilføjer modtagerens svar til samtalehistorikken"""
+        """Add recipient's response to conversation history"""
         last_message = self.txt_last_message.get("1.0", tk.END).strip()
         
         if last_message:
-            # Opdater samtalehistorik
+            # Update conversation history
             context = self.txt_context.get("1.0", tk.END).strip()
             context += f"\nHende: {last_message}"
             self.txt_context.delete("1.0", tk.END)
             self.txt_context.insert("1.0", context)
             
-            # Ryd sidste besked felt
+            # Clear last message field
             self.txt_last_message.delete("1.0", tk.END)
             
-            # Gem samtalen
+            # Save conversation
             self.save_current_conversation_state()
             self.save_current_conversation()
             
@@ -530,7 +566,7 @@ class ChatGPTMessengerApp:
             messagebox.showinfo("Information", "Indtast hendes besked først.")
     
     def key_pressed(self, event):
-        """Håndterer tastetryk i listbox"""
+        """Handle key press in listbox"""
         if event.char.isdigit():
             digit = int(event.char)
             if 1 <= digit <= len(self.suggestions):
@@ -538,13 +574,294 @@ class ChatGPTMessengerApp:
                 self.listbox_suggestions.selection_set(digit-1)
                 self.listbox_suggestions.see(digit-1)
                 self.send_to_messenger()
+    
+    # SCANNER TAB METHODS
+    
+    def upload_image(self):
+        """Upload an image from file"""
+        file_path = filedialog.askopenfilename(
+            filetypes=[("Billedfiler", "*.png;*.jpg;*.jpeg;*.bmp")]
+        )
+        
+        if file_path:
+            try:
+                self.current_image = Image.open(file_path)
+                self.display_image(self.current_image)
+                self.lbl_status.config(text=f"Billede indlæst: {os.path.basename(file_path)}")
+            except Exception as e:
+                self.lbl_status.config(text=f"Fejl ved indlæsning: {str(e)}")
+    
+    def select_area(self):
+        """New method: First take a full screenshot and then select the area"""
+        # Take a complete screenshot
+        try:
+            self.lbl_status.config(text="Tager fuldt skærmbillede...")
+            self.full_screenshot = ImageGrab.grab(all_screens=True)
+            
+            # Hide main window
+            self.root.withdraw()
+            
+            # Create a window to show the full screenshot
+            self.area_window = tk.Toplevel(self.root)
+            self.area_window.attributes('-fullscreen', True)
+            self.area_window.title("Vælg område")
+            
+            # Convert image to PhotoImage
+            screen_width = self.root.winfo_screenwidth()
+            screen_height = self.root.winfo_screenheight()
+            
+            # Adjust image to screen size if necessary
+            if self.full_screenshot.width > screen_width or self.full_screenshot.height > screen_height:
+                self.full_screenshot = self.full_screenshot.resize((screen_width, screen_height), Image.LANCZOS)
+            
+            # Convert to PhotoImage
+            self.tk_image = ImageTk.PhotoImage(self.full_screenshot)
+            
+            # Create canvas with the image
+            self.canvas = tk.Canvas(self.area_window, width=screen_width, height=screen_height)
+            self.canvas.pack(fill=tk.BOTH, expand=True)
+            self.canvas.create_image(0, 0, image=self.tk_image, anchor=tk.NW)
+            
+            # Variables for selection
+            self.start_x = 0
+            self.start_y = 0
+            self.rect = None
+            
+            # Instruction text (displayed on top of the image)
+            self.canvas.create_text(
+                screen_width // 2, 30, 
+                text="Træk for at vælge område - ESC/Q for at annullere", 
+                fill="red", font=("Arial", 16, "bold")
+            )
+            
+            # Bind events
+            self.canvas.bind("<ButtonPress-1>", self.on_area_start)
+            self.canvas.bind("<B1-Motion>", self.on_area_drag)
+            self.canvas.bind("<ButtonRelease-1>", self.on_area_release)
+            self.area_window.bind("<Escape>", self.cancel_area_selection)
+            self.area_window.bind("q", self.cancel_area_selection)
+            self.area_window.bind("Q", self.cancel_area_selection)
+            
+            # Focus on the window
+            self.area_window.focus_force()
+            
+        except Exception as e:
+            self.root.deiconify()
+            self.lbl_status.config(text=f"Fejl ved skærmbillede: {str(e)}")
+    
+    def on_area_start(self, event):
+        """Mouse button down - start area"""
+        self.start_x = event.x
+        self.start_y = event.y
+        
+        # Delete existing rectangle
+        if self.rect:
+            self.canvas.delete(self.rect)
+        
+        # Create new rectangle
+        self.rect = self.canvas.create_rectangle(
+            self.start_x, self.start_y, self.start_x, self.start_y,
+            outline="red", width=2
+        )
+    
+    def on_area_drag(self, event):
+        """Mouse is dragged - update area"""
+        if self.rect:
+            # Update rectangle
+            self.canvas.coords(self.rect, self.start_x, self.start_y, event.x, event.y)
+    
+    def on_area_release(self, event):
+        """Mouse button up - finish area"""
+        if not self.rect:
+            return
+            
+        # Calculate coordinates (ensure that x1 < x2 and y1 < y2)
+        x1 = min(self.start_x, event.x)
+        y1 = min(self.start_y, event.y)
+        x2 = max(self.start_x, event.x)
+        y2 = max(self.start_y, event.y)
+        
+        # Check area size
+        if (x2 - x1) < 10 or (y2 - y1) < 10:
+            # Area too small
+            self.lbl_status.config(text="Området er for lille. Prøv igen.")
+            return
+        
+        try:
+            # Crop the full screenshot to the selected area
+            self.current_image = self.full_screenshot.crop((x1, y1, x2, y2))
+            
+            # Close area window
+            self.area_window.destroy()
+            self.area_window = None
+            
+            # Show main window again
+            self.root.deiconify()
+            
+            # Show the cropped image
+            self.display_image(self.current_image)
+            
+            # Update status
+            self.lbl_status.config(text=f"Område valgt: {x2-x1}x{y2-y1} pixels")
+            
+        except Exception as e:
+            if self.area_window:
+                self.area_window.destroy()
+                self.area_window = None
+            self.root.deiconify()
+            self.lbl_status.config(text=f"Fejl ved beskæring: {str(e)}")
+    
+    def cancel_area_selection(self, event=None):
+        """Cancel area selection"""
+        if self.area_window:
+            self.area_window.destroy()
+            self.area_window = None
+        
+        self.root.deiconify()
+        self.lbl_status.config(text="Områdevalg annulleret")
+    
+    def display_image(self, img):
+        """Display image in the interface"""
+        if img is None:
+            return
+            
+        # Make a copy of the image
+        display_img = img.copy()
+        
+        # Get label dimensions
+        label_width = self.image_label.winfo_width()
+        label_height = self.image_label.winfo_height()
+        
+        # Use default dimensions if label is not visible yet
+        if label_width <= 1:
+            label_width = 600
+        if label_height <= 1:
+            label_height = 300
+        
+        # Adjust image to label size
+        img_width, img_height = display_img.size
+        ratio = min(label_width/img_width, label_height/img_height)
+        new_width = int(img_width * ratio)
+        new_height = int(img_height * ratio)
+        
+        display_img = display_img.resize((new_width, new_height), Image.LANCZOS)
+        
+        # Display image
+        tk_img = ImageTk.PhotoImage(display_img)
+        self.image_label.config(image=tk_img)
+        self.image_label.image = tk_img  # Keep reference
+    
+    def clear_image(self):
+        """Remove the current image"""
+        self.current_image = None
+        self.image_label.config(image='')
+        self.result_text.delete(1.0, tk.END)
+        self.lbl_status.config(text="Billede slettet")
+    
+    def scan_conversation(self):
+        """Scan the image for text"""
+        if self.current_image is None:
+            self.lbl_status.config(text="Intet billede at scanne")
+            return
+        
+        try:
+            self.lbl_status.config(text="Scanner billede...")
+            self.root.update()
+            
+            # Try to scan with Danish language, fall back to English
+            try:
+                text = pytesseract.image_to_string(self.current_image, lang='dan')
+            except:
+                text = pytesseract.image_to_string(self.current_image)
+            
+            # Process the text
+            result = self.process_conversation(text)
+            
+            # Show the result
+            self.result_text.delete(1.0, tk.END)
+            self.result_text.insert(tk.END, result)
+            
+            self.lbl_status.config(text="Scanning fuldført")
+        except Exception as e:
+            self.lbl_status.config(text=f"Fejl ved scanning: {str(e)}")
+    
+    def process_conversation(self, text):
+        """Process text to identify message types"""
+        lines = text.split('\n')
+        result_lines = []
+        
+        # Keywords to identify message types - these can be improved with machine learning in future versions
+        # The keywords below are examples and might need to be adjusted based on typical conversations
+        your_message_keywords = ["Jep", "Får", "Bare kom", "Sådan ik", "længt væk", "bor", "hvor du bor", 
+                               "Jeg", "Tak", "Super", "Fedt", "Hvad med dig", "Skal vi", "Send", 
+                               "Smiler", "Hvornår", "Jeg synes", "Helt sikkert"]
+        
+        their_message_keywords = ["Er det i dag", "Fuck måske", "Hvor er det", "Fair okay", "Men kommer", 
+                               "arbejdstøj", "Mårslev", "Hej", "Hvad så", "Hvordan", "Jeg er", 
+                               "Måske", "Har du", "Kan du", "Skal vi", "Ved ikke", "Hvad laver du"]
+        
+        # Detect if text is on the right side based on indentation (specific to Messenger layout)
+        def is_right_side(text):
+            # If text starts with multiple spaces, it's likely on the right side
+            if text.startswith("    ") or text.startswith("\t") or "      " in text:
+                return True
+            return False
+        
+        # Process each line
+        last_position = None
+        current_message = ""
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                # Save any current message before continuing
+                if current_message and last_position is not None:
+                    if last_position == "right":
+                        result_lines.append(f"DIG (højre): {current_message.strip()}")
+                    else:
+                        result_lines.append(f"DEM (venstre): {current_message.strip()}")
+                    current_message = ""
+                continue
+            
+            # Try to determine if this line is yours or theirs based on position and keywords
+            position_guess = "right" if is_right_side(line) else "left"
+            
+            # Additional check based on keywords
+            if any(keyword in line for keyword in your_message_keywords):
+                position_guess = "right"
+            elif any(keyword in line for keyword in their_message_keywords):
+                position_guess = "left"
+                
+            # If we're switching sides, save the current message
+            if last_position is not None and position_guess != last_position and current_message:
+                if last_position == "right":
+                    result_lines.append(f"DIG (højre): {current_message.strip()}")
+                else:
+                    result_lines.append(f"DEM (venstre): {current_message.strip()}")
+                current_message = ""
+            
+            # Add current line to the message
+            current_message += line + " "
+            last_position = position_guess
+        
+        # Save the last message if there is one
+        if current_message and last_position is not None:
+            if last_position == "right":
+                result_lines.append(f"DIG (højre): {current_message.strip()}")
+            else:
+                result_lines.append(f"DEM (venstre): {current_message.strip()}")
+        
+        # If we couldn't determine any messages, just return the raw text
+        if not result_lines:
+            return "Kunne ikke genkende beskedmønster. Rå tekst:\n\n" + text
+            
+        return '\n'.join(result_lines)
 
-# Hovedfunktion til at starte applikationen
+# Main function to start the application
 def main():
     root = tk.Tk()
-    app = ChatGPTMessengerApp(root)
+    app = CombinedDatingApp(root)
     root.mainloop()
 
 if __name__ == "__main__":
     main()
-#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
